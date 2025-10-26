@@ -38,53 +38,57 @@ class FaceDetectionState {
 }
 
 class CarState {
-  final double xPosition; // -1.0 to 1.0 (left to right)
-  final double speed; // 0.0 to 100.0
-  final double distance; // Total distance traveled
-  final int score;
+  final double progress; // 0.0 to 1.0 (start to finish)
+  final double xPosition; // -1.0 to 1.0 (left to right across the road)
+  final double speed; // Movement speed based on blink frequency
+  final int score; // Total score from collected bonuses
+  final int bonusesCollected;
   
   const CarState({
+    this.progress = 0.0,
     this.xPosition = 0.0,
     this.speed = 0.0,
-    this.distance = 0.0,
     this.score = 0,
+    this.bonusesCollected = 0,
   });
   
   CarState copyWith({
+    double? progress,
     double? xPosition,
     double? speed,
-    double? distance,
     int? score,
+    int? bonusesCollected,
   }) {
     return CarState(
+      progress: progress ?? this.progress,
       xPosition: xPosition ?? this.xPosition,
       speed: speed ?? this.speed,
-      distance: distance ?? this.distance,
       score: score ?? this.score,
+      bonusesCollected: bonusesCollected ?? this.bonusesCollected,
     );
   }
 }
 
-class Obstacle {
-  double yPosition; // 0.0 to 1.0 (top to bottom)
-  final double xPosition; // -1.0 to 1.0 (left to right)
-  final double width;
+class BonusItem {
+  final double position; // 0.0 to 1.0 along the road
+  final double lanePosition; // -1.0 to 1.0 (left to right)
+  final int points;
+  bool collected;
   
-  Obstacle({
-    required this.yPosition,
-    required this.xPosition,
-    this.width = 0.15,
+  BonusItem({
+    required this.position,
+    required this.lanePosition,
+    this.points = 10,
+    this.collected = false,
   });
   
-  bool checkCollision(double carX, double carY, double carWidth) {
-    final carLeft = carX - carWidth / 2;
-    final carRight = carX + carWidth / 2;
-    final obstacleLeft = xPosition - width / 2;
-    final obstacleRight = xPosition + width / 2;
+  bool checkCollection(double carProgress, double carX, double collectionRange) {
+    if (collected) return false;
     
-    final horizontalOverlap = carRight > obstacleLeft && carLeft < obstacleRight;
-    final verticalOverlap = (carY - 0.1) < yPosition && (carY + 0.1) > yPosition;
+    // Check if car is within collection range (both vertically and horizontally)
+    final distanceFromCar = (position - carProgress).abs();
+    final horizontalDistance = (lanePosition - carX).abs();
     
-    return horizontalOverlap && verticalOverlap;
+    return distanceFromCar < collectionRange && horizontalDistance < 0.3;
   }
 }
