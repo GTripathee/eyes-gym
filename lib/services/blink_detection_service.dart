@@ -1,79 +1,73 @@
 import 'package:eyesgym/models/eye_state.dart';
 
 class BlinkDetectionService {
-  bool _wasLeftEyeClosed = false;
-  bool _wasRightEyeClosed = false;
   bool _wereBothEyesClosed = false;
+  DateTime? _eyesClosedStartTime;
   
-  DateTime? _lastLeftBlink;
-  DateTime? _lastRightBlink;
-  DateTime? _lastBothBlink;
-  
-  int _leftBlinkCount = 0;
-  int _rightBlinkCount = 0;
-  int _bothBlinkCount = 0;
+  // Tuning parameters
+  static const double _eyeOpenThreshold = 0.5;
+  static const double _eyeClosedThreshold = 0.2; // Stricter threshold for closing
   
   BlinkEvent? detectBlink(EyeState eyeState) {
     final now = DateTime.now();
     BlinkEvent? event;
     
-    // Detect left eye blink
-    if (!eyeState.isLeftEyeOpen && eyeState.isRightEyeOpen && !_wasLeftEyeClosed) {
-      _wasLeftEyeClosed = true;
-      _lastLeftBlink = now;
-      _leftBlinkCount++;
-      event = BlinkEvent(type: BlinkType.leftEye, timestamp: now);
-    } else if (eyeState.isLeftEyeOpen) {
-      _wasLeftEyeClosed = false;
-    }
-    
-    // Detect right eye blink
-    if (!eyeState.isRightEyeOpen && eyeState.isLeftEyeOpen && !_wasRightEyeClosed) {
-      _wasRightEyeClosed = true;
-      _lastRightBlink = now;
-      _rightBlinkCount++;
-      event = BlinkEvent(type: BlinkType.rightEye, timestamp: now);
-    } else if (eyeState.isRightEyeOpen) {
-      _wasRightEyeClosed = false;
-    }
-    
-    // Detect both eyes blink
-    if (eyeState.isBothEyesClosed && !_wereBothEyesClosed) {
+    // We strictly use "Both Eyes" for the game to prevent accidental winks
+    // Using a hysteresis threshold to prevent flickering
+    bool areEyesClosed = eyeState.leftEyeOpenProbability < _eyeClosedThreshold && 
+                         eyeState.rightEyeOpenProbability < _eyeClosedThreshold;
+                         
+    bool areEyesOpen = eyeState.leftEyeOpenProbability > _eyeOpenThreshold && 
+                       eyeState.rightEyeOpenProbability > _eyeOpenThreshold;
+
+    if (areEyesClosed && !_wereBothEyesClosed) {
+      // Eyes just closed, start timer
       _wereBothEyesClosed = true;
-      _lastBothBlink = now;
-      _bothBlinkCount++;
-      event = BlinkEvent(type: BlinkType.bothEyes, timestamp: now);
-    } else if (eyeState.isBothEyesOpen) {
+      _eyesClosedStartTime = now;
+      return BlinkEvent(type: BlinkType.eyesClosed, timestamp: now);
+    } 
+    
+    if (areEyesOpen && _wereBothEyesClosed) {
+      // Eyes just opened, calculate duration
       _wereBothEyesClosed = false;
+      
+      if (_eyesClosedStartTime != null) {
+        final duration = now.difference(_eyesClosedStartTime!);
+        event = BlinkEvent(
+          type: BlinkType.blinkComplete, 
+          timestamp: now,
+          duration: duration
+        );
+      }
+      _eyesClosedStartTime = null;
     }
     
     return event;
   }
   
-  double getBlinkFrequency(Duration window) {
-    final now = DateTime.now();
-    final windowStart = now.subtract(window);
-    
-    int recentBlinks = 0;
-    if (_lastBothBlink != null && _lastBothBlink!.isAfter(windowStart)) {
-      recentBlinks++;
+  Duration getCurrentClosedDuration() {
+    if (_wereBothEyesClosed && _eyesClosedStartTime != null) {
+      return DateTime.now().difference(_eyesClosedStartTime!);
     }
-    
-    return recentBlinks / window.inSeconds;
+    return Duration.zero;
   }
   
   void reset() {
-    _leftBlinkCount = 0;
-    _rightBlinkCount = 0;
-    _bothBlinkCount = 0;
+    _wereBothEyesClosed = false;
+    _eyesClosedStartTime = null;
   }
 }
 
-enum BlinkType { leftEye, rightEye, bothEyes }
+enum BlinkType { eyesClosed, blinkComplete }
 
 class BlinkEvent {
   final BlinkType type;
   final DateTime timestamp;
+  final Duration duration;
   
-  BlinkEvent({required this.type, required this.timestamp});
+  BlinkEvent({
+    required this.type, 
+    required this.timestamp, 
+    this.duration = Duration.zero
+  });
 }

@@ -41,25 +41,27 @@ class GameViewModel extends ChangeNotifier {
   
   Timer? _gameLoopTimer;
   DateTime? _lastFrameTime;
-  DateTime? _lastBlinkTime;
+  DateTime? _lastBlinkTime; // For "Game Over" check
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
   
   final Random _random = Random();
   
-  // Game configuration
-  static const double _roadLength = 1.0; // Full length of the road
-  static const double _collectionRange = 0.08; // Range to collect bonuses (increased for smaller car)
-  static const int _totalBonusItems = 6; // Total bonus items along the road (3x more for longer track)
-  static const double _baseSpeed = 0.0003; // Base movement speed (5x faster for visible movement)
-  static const double _blinkSpeedBoost = 0.00025; // Speed boost per blink (5x increase)
-  static const double _continuousBlinkSpeedMultiplier = 4.0; // 4x speed boost for continuous blinking
-  static const Duration _continuousBlinkThreshold = Duration(milliseconds: 2000); // 2 seconds of continuous blinking
-  static const Duration _maxTimeBetweenBlinks = Duration(seconds: 5); // Max time without blinking
+  // Game Physics
+  static const double _roadLength = 1.0; 
+  static const double _collectionRange = 0.05; 
+  static const int _totalBonusItems = 10; 
+  static const double _friction = 0.95; // Speed decay factor
+  static const double _minSpeed = 0.0001;
+  static const double _maxSpeed = 0.03; 
   
-  int _consecutiveBlinkCount = 0;
-  DateTime? _firstBlinkInSequence;
-  
+  // Blink Power Settings
+  static const double _shortBlinkBoost = 0.004; 
+  static const double _powerBlinkBoost = 0.015; // NITRO!
+  static const Duration _powerBlinkThreshold = Duration(milliseconds: 600); // Hold for 0.6s to charge
+  static const Duration _maxChargeTime = Duration(milliseconds: 2000); // 2 seconds max charge
+  static const Duration _maxTimeBetweenBlinks = Duration(seconds: 8); 
+
   GameViewModel({
     required this.camera,
     FaceDetectionService? faceDetectionService,
@@ -81,7 +83,6 @@ class GameViewModel extends ChangeNotifier {
       await _controller.initialize();
       _isInitialized = true;
       notifyListeners();
-      
       _startImageStream();
     } catch (e) {
       _errorMessage = e.toString();
@@ -92,99 +93,86 @@ class GameViewModel extends ChangeNotifier {
   void _startImageStream() {
     _controller.startImageStream((CameraImage image) {
       if (!_isDetecting) {
-        _isDetecting = true;
         _processImage(image);
       }
     });
   }
   
   Future<void> _processImage(CameraImage image) async {
-    final inputImage = _imageConversionService.convertCameraImage(image);
-    
-    if (inputImage == null) {
-      _isDetecting = false;
-      return;
-    }
-    
-    final faces = await _faceDetectionService.detectFaces(inputImage);
-    final fps = _calculateFPS();
-    
-    _detectionState = _detectionState.copyWith(
-      faces: faces,
-      fps: fps,
-      frameCount: _detectionState.frameCount + 1,
-    );
-    
-    // Process blink events for game control
-    if (_isGameRunning && _detectionState.eyeState != null) {
-      final blinkEvent = _blinkDetectionService.detectBlink(_detectionState.eyeState!);
-      if (blinkEvent != null) {
-        _handleBlinkEvent(blinkEvent);
-      }
-    }
-    
-    notifyListeners();
-    _isDetecting = false;
-  }
-  
-  void _handleBlinkEvent(BlinkEvent event) {
-    final now = DateTime.now();
-    
-    // Only respond to both-eyes blink for forward movement
-    if (event.type == BlinkType.bothEyes) {
-      // Track consecutive blinks
-      if (_lastBlinkTime != null && now.difference(_lastBlinkTime!).inMilliseconds < 500) {
-        _consecutiveBlinkCount++;
-        _firstBlinkInSequence ??= _lastBlinkTime;
-      } else {
-        _consecutiveBlinkCount = 1;
-        _firstBlinkInSequence = now;
+    _isDetecting = true;
+    try {
+      final inputImage = _imageConversionService.convertCameraImage(image);
+      if (inputImage == null) return;
+      
+      final faces = await _faceDetectionService.detectFaces(inputImage);
+      
+      _detectionState = _detectionState.copyWith(
+        faces: faces,
+        frameCount: _detectionState.frameCount + 1,
+      );
+      
+      if (_isGameRunning && _detectionState.eyeState != null) {
+        // Detect Blinks
+        final blinkEvent = _blinkDetectionService.detectBlink(_detectionState.eyeState!);
+        
+        // Handle blink completion (Open Eyes)
+        if (blinkEvent != null && blinkEvent.type == BlinkType.blinkComplete) {
+            _handleBlinkComplete(blinkEvent.duration);
+        }
+        
+        // Handle charging status (Eyes currently closed)
+        if (blinkEvent != null && blinkEvent.type == BlinkType.eyesClosed) {
+             // Started closing
+             _carState = _carState.copyWith(isCharging: true, chargeLevel: 0.0);
+        } else if (_carState.isCharging) {
+            // Still closing, update charge level
+            final duration = _blinkDetectionService.getCurrentClosedDuration();
+            double charge = (duration.inMilliseconds / _maxChargeTime.inMilliseconds).clamp(0.0, 1.0);
+            _carState = _carState.copyWith(chargeLevel: charge);
+        }
       }
       
-      _lastBlinkTime = now;
-      
-      // Check if user has been blinking continuously for 2+ seconds
-      double speedBoost = _blinkSpeedBoost;
-      if (_firstBlinkInSequence != null && 
-          now.difference(_firstBlinkInSequence!).inMilliseconds >= _continuousBlinkThreshold.inMilliseconds &&
-          _consecutiveBlinkCount >= 3) {
-        // Apply 4x speed multiplier for continuous blinking
-        speedBoost *= _continuousBlinkSpeedMultiplier;
-      }
-      
-      // Accelerate forward
-      double currentSpeed = _carState.speed + speedBoost;
-      _carState = _carState.copyWith(speed: currentSpeed);
       notifyListeners();
+    } catch (e) {
+      print("Error processing image: $e");
+    } finally {
+      _isDetecting = false;
     }
   }
   
-  double _calculateFPS() {
-    final now = DateTime.now();
-    if (_lastFrameTime != null) {
-      final diff = now.difference(_lastFrameTime!).inMilliseconds;
-      if (diff > 0) {
-        _lastFrameTime = now;
-        return 1000 / diff;
-      }
+  void _handleBlinkComplete(Duration duration) {
+    _lastBlinkTime = DateTime.now();
+    _carState = _carState.copyWith(isCharging: false, chargeLevel: 0.0);
+    
+    // Determine boost type based on duration
+    double boost;
+    if (duration > _powerBlinkThreshold) {
+        // Power Blink (Nitro)
+        // Calculate multiplier: longer hold = more speed (up to a limit)
+        double multiplier = (duration.inMilliseconds / _powerBlinkThreshold.inMilliseconds).clamp(1.0, 3.0);
+        boost = _powerBlinkBoost * multiplier;
+    } else {
+        // Standard Blink
+        boost = _shortBlinkBoost;
     }
-    _lastFrameTime = now;
-    return 0.0;
+    
+    // Apply speed
+    double newSpeed = (_carState.speed + boost).clamp(0.0, _maxSpeed);
+    _carState = _carState.copyWith(speed: newSpeed);
   }
   
   void startGame() {
     _isGameRunning = true;
     _isGameOver = false;
     _isGameWon = false;
-    _carState = const CarState(speed: _baseSpeed, xPosition: 0.0);
+    _carState = const CarState(speed: 0.0);
     _generateBonusItems();
     _blinkDetectionService.reset();
-    _lastBlinkTime = DateTime.now(); // Initialize with current time
-    _consecutiveBlinkCount = 0;
-    _firstBlinkInSequence = null;
+    _lastBlinkTime = DateTime.now();
     
+    _gameLoopTimer?.cancel();
     _gameLoopTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
-      _updateGame();
+      _updateGamePhysics();
     });
     
     notifyListeners();
@@ -192,73 +180,43 @@ class GameViewModel extends ChangeNotifier {
   
   void _generateBonusItems() {
     _bonusItems.clear();
-    
     for (int i = 0; i < _totalBonusItems; i++) {
-      // Distribute bonuses evenly along the road with some randomness
-      double basePosition = (i + 1) / (_totalBonusItems + 1);
-      double randomOffset = (_random.nextDouble() - 0.5) * 0.02;
-      double position = (basePosition + randomOffset).clamp(0.05, 0.98);
-      
-      // All bonuses on center path (no horizontal variation)
-      double lanePosition = 0.0;
-      
-      // Reduced bonus points by half
-      int points = _random.nextDouble() < 0.2 ? 10 : 5;
-      
+      double position = ((i + 1) / (_totalBonusItems + 1)).clamp(0.05, 0.95);
       _bonusItems.add(BonusItem(
         position: position,
-        lanePosition: lanePosition,
-        points: points,
+        lanePosition: 0.0,
+        points: 10,
       ));
     }
   }
   
-  void _updateGame() {
+  void _updateGamePhysics() {
     if (!_isGameRunning || _isGameOver) return;
     
     final now = DateTime.now();
     
-    // Check if too much time has passed without blinking
-    if (_lastBlinkTime != null) {
-      final timeSinceLastBlink = now.difference(_lastBlinkTime!);
-      if (timeSinceLastBlink > _maxTimeBetweenBlinks) {
-        _gameOver();
-        return;
-      }
+    // Check Timeout
+    if (_lastBlinkTime != null && now.difference(_lastBlinkTime!) > _maxTimeBetweenBlinks) {
+      _gameOver();
+      return;
     }
     
-    // Calculate speed with faster decay
-    double currentSpeed = _carState.speed;
+    // Apply Friction (Slow down car)
+    double currentSpeed = _carState.speed * _friction;
+    if (currentSpeed < _minSpeed) currentSpeed = 0.0;
     
-    // Apply faster speed decay (3x faster)
-    if (_lastBlinkTime != null) {
-      final timeSinceLastBlink = now.difference(_lastBlinkTime!).inMilliseconds;
-      // Speed decays faster if not blinking
-      if (timeSinceLastBlink > 500) {
-        currentSpeed = (currentSpeed - 0.000015).clamp(_baseSpeed, double.infinity);
-        
-        // Reset consecutive blink tracking if too much time has passed
-        if (timeSinceLastBlink > 500) {
-          _consecutiveBlinkCount = 0;
-          _firstBlinkInSequence = null;
-        }
-      }
-    } else {
-      currentSpeed = _baseSpeed;
-    }
-    
-    // Update progress - always move forward with current speed
+    // Move Car
     double newProgress = (_carState.progress + currentSpeed).clamp(0.0, 1.0);
     
+    // Update State
     _carState = _carState.copyWith(
       progress: newProgress,
       speed: currentSpeed,
     );
     
-    // Check for bonus collection (car stays centered)
+    // Check Collections
     for (var bonus in _bonusItems) {
-      if (!bonus.collected && 
-          bonus.checkCollection(_carState.progress, 0.0, _collectionRange)) {
+      if (!bonus.collected && bonus.checkCollection(_carState.progress, 0.0, _collectionRange)) {
         bonus.collected = true;
         _carState = _carState.copyWith(
           score: _carState.score + bonus.points,
@@ -267,10 +225,9 @@ class GameViewModel extends ChangeNotifier {
       }
     }
     
-    // Check if reached the end
-    if (_carState.progress >= 0.99) {
+    // Win Condition
+    if (_carState.progress >= 1.0) {
       _gameWon();
-      return;
     }
     
     notifyListeners();
@@ -296,21 +253,8 @@ class GameViewModel extends ChangeNotifier {
     _isGameWon = false;
     _isGameRunning = false;
     _carState = const CarState();
-    _bonusItems.clear();
-    _lastBlinkTime = null;
-    _consecutiveBlinkCount = 0;
-    _firstBlinkInSequence = null;
     _gameLoopTimer?.cancel();
     notifyListeners();
-  }
-  
-  double getBlinkFrequency() {
-    return _blinkDetectionService.getBlinkFrequency(const Duration(seconds: 10));
-  }
-  
-  Duration? getTimeSinceLastBlink() {
-    if (_lastBlinkTime == null) return null;
-    return DateTime.now().difference(_lastBlinkTime!);
   }
   
   @override

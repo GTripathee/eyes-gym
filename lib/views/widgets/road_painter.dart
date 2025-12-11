@@ -10,266 +10,107 @@ class RoadPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final roadWidth = size.width * 0.35; // Narrower road (was 0.6)
+    final roadWidth = size.width * 0.4; 
     final roadLeft = (size.width - roadWidth) / 2;
     
-    // Draw grass background
-    final grassPaint = Paint()..color = Colors.green[700]!;
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), grassPaint);
+    // 1. Draw Grass
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), Paint()..color = Colors.green[800]!);
     
-    // Draw road
-    final roadPaint = Paint()..color = Colors.grey[700]!;
-    canvas.drawRect(
-      Rect.fromLTWH(roadLeft, 0, roadWidth, size.height),
-      roadPaint,
-    );
+    // 2. Draw Road
+    canvas.drawRect(Rect.fromLTWH(roadLeft, 0, roadWidth, size.height), Paint()..color = Colors.grey[800]!);
     
-    // Draw road edges
-    final edgePaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 8;
-    
-    canvas.drawLine(
-      Offset(roadLeft, 0),
-      Offset(roadLeft, size.height),
-      edgePaint,
-    );
-    canvas.drawLine(
-      Offset(roadLeft + roadWidth, 0),
-      Offset(roadLeft + roadWidth, size.height),
-      edgePaint,
-    );
-    
-    // Draw START marker at top
-    _drawTextMarker(canvas, size, 'START', 50, Colors.green);
-    
-    // Draw FINISH marker at bottom
-    _drawTextMarker(canvas, size, 'FINISH', size.height - 80, Colors.red);
-    
-    // Draw lane markings (dashed center line)
-    final lanePaint = Paint()
-      ..color = Colors.yellow
-      ..strokeWidth = 4
-      ..style = PaintingStyle.stroke;
-    
-    const dashHeight = 30.0;
-    const dashSpace = 20.0;
-    double startY = 0;
-    
-    while (startY < size.height) {
-      canvas.drawLine(
-        Offset(size.width / 2, startY),
-        Offset(size.width / 2, startY + dashHeight),
-        lanePaint,
-      );
-      startY += dashHeight + dashSpace;
-    }
-    
-    // Draw progress markers (0%, 25%, 50%, 75%)
-    final markerPaint = Paint()
-      ..color = Colors.white.withOpacity(0.3)
-      ..strokeWidth = 2;
-    
-    for (double progress in [0.25, 0.5, 0.75]) {
-      final y = size.height * (1 - progress);
-      canvas.drawLine(
-        Offset(roadLeft, y),
-        Offset(roadLeft + roadWidth, y),
-        markerPaint,
-      );
-      
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: '${(progress * 100).toInt()}%',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(canvas, Offset(roadLeft - 40, y - 6));
-    }
-    
-    // Draw bonus items
+    // 3. Draw Lane Markings (Moving effect)
+    // We use car progress to offset lines to create illusion of speed
+    double offset = (carState.progress * 1000) % 50; 
+    _drawLaneMarkings(canvas, size, roadWidth, offset);
+
+    // 4. Draw Bonuses
     for (var bonus in bonusItems) {
       if (!bonus.collected) {
-        _drawBonus(canvas, size, bonus, roadWidth, roadLeft);
+        // Only draw if visible on screen
+        double screenY = _getScreenY(size, bonus.position, carState.progress);
+        if (screenY > -50 && screenY < size.height + 50) {
+             _drawBonus(canvas, size, screenY, roadWidth);
+        }
       }
     }
     
-    // Draw car at its current progress position
-    _drawCar(canvas, size, carState, roadWidth, roadLeft);
+    // 5. Draw Car
+    _drawCar(canvas, size, carState, roadWidth);
+    
+    // 6. Draw Charging Effect (Power Blink)
+    if (carState.isCharging) {
+        _drawChargeEffect(canvas, size, carState.chargeLevel);
+    }
   }
   
-  void _drawTextMarker(Canvas canvas, Size size, String text, double y, Color color) {
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          color: color,
-          fontSize: 28,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 2,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-    
-    final x = (size.width - textPainter.width) / 2;
-    
-    // Draw background
-    final bgPaint = Paint()
-      ..color = Colors.black.withOpacity(0.5)
-      ..style = PaintingStyle.fill;
-    
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(x - 10, y - 5, textPainter.width + 20, textPainter.height + 10),
-        const Radius.circular(8),
-      ),
-      bgPaint,
-    );
-    
-    textPainter.paint(canvas, Offset(x, y));
+  double _getScreenY(Size size, double objectProgress, double carProgress) {
+      // Simple perspective projection: 
+      // Objects move down as car moves up (progress increases)
+      // We keep the car fixed at 80% down the screen usually, 
+      // but here we are mapping 0-1 progress to full height.
+      // Let's map progress relative to road length.
+      return size.height * (1 - (objectProgress));
   }
   
-  void _drawBonus(Canvas canvas, Size size, BonusItem bonus, double roadWidth, double roadLeft) {
-    // Calculate position on screen (inverted - start at bottom, end at top)
-    final y = size.height * (1 - bonus.position);
-    final x = size.width / 2 + (bonus.lanePosition * roadWidth / 2);
-    
-    // Draw bonus as a star or coin
-    final bonusPaint = Paint()
-      ..color = bonus.points > 10 ? Colors.amber : Colors.yellow
-      ..style = PaintingStyle.fill;
-    
-    final borderPaint = Paint()
-      ..color = Colors.orange[900]!
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    
-    // Draw star shape
-    final path = Path();
-    final radius = 15.0;
-    final innerRadius = radius * 0.5;
-    
-    for (int i = 0; i < 5; i++) {
-      final angle = (i * 2 * math.pi / 5) - math.pi / 2;
-      final nextAngle = ((i + 0.5) * 2 * math.pi / 5) - math.pi / 2;
-      
-      if (i == 0) {
-        path.moveTo(
-          x + radius * math.cos(angle),
-          y + radius * math.sin(angle),
-        );
-      } else {
-        path.lineTo(
-          x + radius * math.cos(angle),
-          y + radius * math.sin(angle),
-        );
+  void _drawLaneMarkings(Canvas canvas, Size size, double roadWidth, double offset) {
+      final paint = Paint()..color = Colors.white.withOpacity(0.5)..strokeWidth = 4;
+      double centerX = size.width / 2;
+      for (double i = -50; i < size.height + 50; i += 50) {
+          canvas.drawLine(
+              Offset(centerX, i + offset), 
+              Offset(centerX, i + 30 + offset), 
+              paint
+          );
       }
-      
-      path.lineTo(
-        x + innerRadius * math.cos(nextAngle),
-        y + innerRadius * math.sin(nextAngle),
-      );
-    }
-    path.close();
-    
-    canvas.drawPath(path, bonusPaint);
-    canvas.drawPath(path, borderPaint);
-    
-    // Draw points value
-    if (bonus.points > 10) {
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: '+${bonus.points}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(canvas, Offset(x - textPainter.width / 2, y - textPainter.height / 2));
-    }
   }
   
-  void _drawCar(Canvas canvas, Size size, CarState carState, double roadWidth, double roadLeft) {
-    // Car position based on progress (inverted - starts at bottom, moves to top)
+  void _drawBonus(Canvas canvas, Size size, double y, double roadWidth) {
+    final x = size.width / 2;
+    canvas.drawCircle(Offset(x, y), 10, Paint()..color = Colors.amber);
+    canvas.drawCircle(Offset(x, y), 12, Paint()..color = Colors.orange..style=PaintingStyle.stroke..strokeWidth=2);
+  }
+  
+  void _drawCar(Canvas canvas, Size size, CarState carState, double roadWidth) {
+    // Car is fixed vertically at 80% height for a "chase cam" feel, 
+    // OR moves up as per your original logic. 
+    // Your original logic moved the car up. Let's stick to that for simplicity.
     final carY = size.height * (1 - carState.progress);
-    // Car stays centered horizontally
     final carX = size.width / 2;
-    final carWidth = roadWidth * 0.18; // Smaller car (was 0.25)
-    final carHeight = carWidth * 1.8;
     
-    // Draw car body
-    final carPaint = Paint()..color = Colors.blue[700]!;
-    
-    final carRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: Offset(carX, carY),
-        width: carWidth,
-        height: carHeight,
-      ),
-      const Radius.circular(12),
+    // Draw Car Body
+    canvas.drawRect(
+        Rect.fromCenter(center: Offset(carX, carY), width: 40, height: 60), 
+        Paint()..color = Colors.blue
     );
-    canvas.drawRRect(carRect, carPaint);
-    
-    // Draw car outline
-    final outlinePaint = Paint()
-      ..color = Colors.blue[900]!
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    canvas.drawRRect(carRect, outlinePaint);
-    
-    // Draw windshield
-    final windowPaint = Paint()..color = Colors.lightBlue[200]!;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: Offset(carX, carY - carHeight * 0.15),
-          width: carWidth * 0.7,
-          height: carHeight * 0.35,
-        ),
-        const Radius.circular(8),
-      ),
-      windowPaint,
-    );
-    
-    // Draw wheels
-    final wheelPaint = Paint()..color = Colors.black;
-    final wheelRadius = carWidth * 0.15;
-    
-    // Left wheels
-    canvas.drawCircle(
-      Offset(carX - carWidth * 0.3, carY - carHeight * 0.3),
-      wheelRadius,
-      wheelPaint,
-    );
-    canvas.drawCircle(
-      Offset(carX - carWidth * 0.3, carY + carHeight * 0.3),
-      wheelRadius,
-      wheelPaint,
-    );
-    
-    // Right wheels
-    canvas.drawCircle(
-      Offset(carX + carWidth * 0.3, carY - carHeight * 0.3),
-      wheelRadius,
-      wheelPaint,
-    );
-    canvas.drawCircle(
-      Offset(carX + carWidth * 0.3, carY + carHeight * 0.3),
-      wheelRadius,
-      wheelPaint,
-    );
+  }
+  
+  void _drawChargeEffect(Canvas canvas, Size size, double level) {
+      final center = Offset(size.width / 2, size.height * (1 - carState.progress));
+      
+      // Draw growing circle behind car
+      final radius = 40.0 + (level * 20.0);
+      final opacity = 0.3 + (level * 0.4);
+      
+      final paint = Paint()
+        ..color = Colors.cyanAccent.withOpacity(opacity)
+        ..style = PaintingStyle.fill
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+        
+      canvas.drawCircle(center, radius, paint);
+      
+      // Draw text "POWER CHARGE" if level is high
+      if (level > 0.8) {
+          final textPainter = TextPainter(
+            text: const TextSpan(
+                text: "NITRO READY!",
+                style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 16)
+            ),
+            textDirection: TextDirection.ltr
+          );
+          textPainter.layout();
+          textPainter.paint(canvas, center + const Offset(-40, -80));
+      }
   }
 
   @override

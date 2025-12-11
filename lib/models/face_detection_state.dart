@@ -22,7 +22,6 @@ class FaceDetectionState {
               )
             : null;
 
-
   FaceDetectionState copyWith({
       List<Face>? faces,
       double? fps,
@@ -34,15 +33,16 @@ class FaceDetectionState {
         frameCount: frameCount ?? this.frameCount,
       );
     }
-
 }
 
 class CarState {
-  final double progress; // 0.0 to 1.0 (start to finish)
-  final double xPosition; // -1.0 to 1.0 (left to right across the road)
-  final double speed; // Movement speed based on blink frequency
-  final int score; // Total score from collected bonuses
+  final double progress; 
+  final double xPosition; 
+  final double speed; 
+  final int score; 
   final int bonusesCollected;
+  final bool isCharging; // Visual feedback for holding blink
+  final double chargeLevel; // 0.0 to 1.0
   
   const CarState({
     this.progress = 0.0,
@@ -50,6 +50,8 @@ class CarState {
     this.speed = 0.0,
     this.score = 0,
     this.bonusesCollected = 0,
+    this.isCharging = false,
+    this.chargeLevel = 0.0,
   });
   
   CarState copyWith({
@@ -58,6 +60,8 @@ class CarState {
     double? speed,
     int? score,
     int? bonusesCollected,
+    bool? isCharging,
+    double? chargeLevel,
   }) {
     return CarState(
       progress: progress ?? this.progress,
@@ -65,13 +69,15 @@ class CarState {
       speed: speed ?? this.speed,
       score: score ?? this.score,
       bonusesCollected: bonusesCollected ?? this.bonusesCollected,
+      isCharging: isCharging ?? this.isCharging,
+      chargeLevel: chargeLevel ?? this.chargeLevel,
     );
   }
 }
 
 class BonusItem {
-  final double position; // 0.0 to 1.0 along the road
-  final double lanePosition; // -1.0 to 1.0 (left to right)
+  final double position; 
+  final double lanePosition; 
   final int points;
   bool collected;
   
@@ -84,11 +90,8 @@ class BonusItem {
   
   bool checkCollection(double carProgress, double carX, double collectionRange) {
     if (collected) return false;
-    
-    // Check if car is within collection range (both vertically and horizontally)
     final distanceFromCar = (position - carProgress).abs();
-    final horizontalDistance = (lanePosition - carX).abs();
-    
-    return distanceFromCar < collectionRange && horizontalDistance < 0.3;
+    // Simplified logic: Since car is always center (0.0), we check proximity
+    return distanceFromCar < collectionRange;
   }
 }
