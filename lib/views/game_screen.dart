@@ -1,4 +1,5 @@
 import 'package:camera/camera.dart';
+import 'package:eyesgym/models/face_detection_state.dart';
 import 'package:eyesgym/viewmodels/game_view_model.dart';
 import 'package:eyesgym/views/widgets/road_painter.dart';
 import 'package:flutter/material.dart';
@@ -82,6 +83,7 @@ class _GameScreenState extends State<GameScreen> {
         painter: RoadPainter(
           carState: _viewModel.carState,
           bonusItems: _viewModel.bonusItems,
+          obstacles: _viewModel.obstacles,
         ),
         child: Container(),
       ),
@@ -226,6 +228,21 @@ class _GameScreenState extends State<GameScreen> {
             ),
           ),
           const SizedBox(height: 20),
+          // Difficulty Selector
+          const Text('Select Difficulty:', style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+               _buildDifficultyBtn(DifficultyLevel.easy, "EASY", Colors.green),
+               const SizedBox(width: 8),
+               _buildDifficultyBtn(DifficultyLevel.medium, "MED", Colors.blue),
+               const SizedBox(width: 8),
+               _buildDifficultyBtn(DifficultyLevel.hard, "HARD", Colors.red),
+            ],
+          ),
+          
+          const SizedBox(height: 20),
           _buildInstructions(),
           const SizedBox(height: 25),
           ElevatedButton(
@@ -267,8 +284,27 @@ class _GameScreenState extends State<GameScreen> {
       ),
     );
   }
+
+  Widget _buildDifficultyBtn(DifficultyLevel level, String label, Color color) {
+    final isSelected = _viewModel.difficulty == level;
+    return GestureDetector(
+        onTap: () => _viewModel.setDifficulty(level),
+        child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+                color: isSelected ? color : color.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 2),
+            ),
+            child: Text(label, style: TextStyle(color: Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+        ),
+    );
+  }
   
   Widget _buildInstructions() {
+    String steerText = _viewModel.difficulty == DifficultyLevel.easy
+          ? "Auto-steering enabled" 
+          : "Tilt head Left/Right to steer";
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -277,24 +313,11 @@ class _GameScreenState extends State<GameScreen> {
         border: Border.all(color: Colors.blue, width: 2),
       ),
       child: Column(
-        children: [
-          const Text(
-            '🎮 How to Play',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildInstructionRow('👀', 'Blink BOTH eyes to move forward'),
-          const SizedBox(height: 8),
-          _buildInstructionRow('⭐', 'Collect bonus stars for points'),
-          const SizedBox(height: 8),
-          _buildInstructionRow('⚠️', 'Keep blinking! Game ends after 5s'),
-          const SizedBox(height: 8),
-          _buildInstructionRow('🏁', 'Reach the finish line to win!'),
-        ],
+          children: [
+              Text("👀 Blink to Move", style: TextStyle(color: Colors.white70)),
+              Text("😑 Hold blink for NITRO", style: TextStyle(color: Colors.white70)),
+              Text("🤕 $steerText", style: TextStyle(color: Colors.amber)),
+          ],
       ),
     );
   }
