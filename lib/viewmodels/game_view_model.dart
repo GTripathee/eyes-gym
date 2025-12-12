@@ -7,6 +7,7 @@ import 'package:eyesgym/services/blink_detection_service.dart';
 import 'package:eyesgym/services/face_detection_service.dart';
 import 'package:eyesgym/services/image_conversion_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:eyesgym/services/storage_service.dart';
 
 class GameViewModel extends ChangeNotifier {
   final CameraDescription camera;
@@ -17,6 +18,8 @@ class GameViewModel extends ChangeNotifier {
   late CameraController _controller;
   CameraController get controller => _controller;
   
+  int _sessionBlinks = 0;
+
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
   
@@ -153,6 +156,7 @@ class GameViewModel extends ChangeNotifier {
   }
   
   void _handleBlinkComplete(Duration duration) {
+    _sessionBlinks++;
     _lastBlinkTime = DateTime.now();
     _carState = _carState.copyWith(isCharging: false, chargeLevel: 0.0);
     
@@ -170,6 +174,7 @@ class GameViewModel extends ChangeNotifier {
     _isGameOver = false;
     _isGameWon = false;
     _carState = const CarState(speed: 0.0);
+    _sessionBlinks = 0;
     _generateLevel();
     _blinkDetectionService.reset();
     _lastBlinkTime = DateTime.now();
@@ -290,8 +295,22 @@ class GameViewModel extends ChangeNotifier {
     notifyListeners();
   }
   
-  void _gameWon() { _isGameWon = true; _isGameOver = true; _isGameRunning = false; _gameLoopTimer?.cancel(); notifyListeners(); }
-  void _gameOver() { _isGameOver = true; _isGameRunning = false; _gameLoopTimer?.cancel(); notifyListeners(); }
+  Future<void> _gameWon() async {
+     _isGameWon = true; 
+     _isGameOver = true; 
+     _isGameRunning = false; 
+     _gameLoopTimer?.cancel();
+     await StorageService().saveGameSession(_carState.score, _sessionBlinks);
+      notifyListeners(); 
+    }
+
+  Future<void> _gameOver() async { 
+    _isGameOver = true;
+     _isGameRunning = false; 
+     _gameLoopTimer?.cancel();
+     await StorageService().saveGameSession(_carState.score, _sessionBlinks);
+      notifyListeners(); }
+
   void resetGame() { 
     _isGameOver = false; _isGameWon = false; _isGameRunning = false; 
     _carState = const CarState(); 

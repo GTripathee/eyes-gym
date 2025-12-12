@@ -1,7 +1,7 @@
 
-import 'package:eyesgym/views/game_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:eyesgym/views/landing_page.dart';
 
 
 // Main function to get available cameras and run the app
@@ -32,8 +32,9 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFF121212),
       ),
-      home: GameScreen(camera: camera),
+      home: LandingPage(camera: camera),
     );
   }
 }

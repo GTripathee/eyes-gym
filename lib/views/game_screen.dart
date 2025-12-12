@@ -44,7 +44,7 @@ class _GameScreenState extends State<GameScreen> {
   
   Widget _buildBody() {
     if (_viewModel.errorMessage != null) {
-      return _buildErrorView(_viewModel.errorMessage!);
+      return Center(child: Text('Error: ${_viewModel.errorMessage}'));
     }
     
     if (!_viewModel.isInitialized) {
@@ -54,14 +54,29 @@ class _GameScreenState extends State<GameScreen> {
     return Stack(
       children: [
         _buildGameView(),
-        _buildCameraPreview(),
+        // Camera Preview
+        Positioned(
+          top: 50,
+          right: 20,
+          child: Opacity(
+            opacity: 0.8,
+            child: Container(
+              width: 100,
+              height: 133,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: CameraPreview(_viewModel.controller),
+              ),
+            ),
+          ),
+        ),
         _buildGameOverlay(),
       ],
     );
-  }
-  
-  Widget _buildErrorView(String error) {
-    return Center(child: Text('Error: $error'));
   }
   
   Widget _buildGameView() {
@@ -78,100 +93,76 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
   
-  Widget _buildCameraPreview() {
-    // Only show camera when game is running to reduce distraction, or keep always
-    return Positioned(
-      top: 50,
-      right: 20,
-      child: Opacity(
-        opacity: 0.8,
-        child: Container(
-          width: 100,
-          height: 133,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white, width: 2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: CameraPreview(_viewModel.controller),
-          ),
-        ),
-      ),
-    );
-  }
-  
   Widget _buildGameOverlay() {
     return SafeArea(
       child: Stack(
         children: [
-          // 1. Status Bar (Score/Progress)
-          Column(
-            children: [
-              _buildStatusBar(),
-              const Spacer(),
-            ],
-          ),
-          
-          // 2. Exit Button (Top Left)
+          // 1. Status Bar (Only visible when playing)
+          if (_viewModel.isGameRunning)
+            Positioned(top: 0, left: 0, right: 0, child: _buildStatusBar()),
+
+          // 2. Exit Button (During Game Only)
           if (_viewModel.isGameRunning)
             Positioned(
               top: 10,
               left: 10,
-              child: _buildExitButton(),
+              child: _buildInGameExitButton(),
             ),
 
           // 3. Center Screens (Start / Game Over)
           Center(
-             child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (!_viewModel.isGameRunning && !_viewModel.isGameOver)
-                    _buildStartScreen(),
-                  if (_viewModel.isGameOver)
-                    _buildGameOverScreen(),
-                ],
+             child: SingleChildScrollView(
+               child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!_viewModel.isGameRunning && !_viewModel.isGameOver)
+                      _buildStartScreen(),
+                    if (_viewModel.isGameOver)
+                      _buildGameOverScreen(),
+                  ],
+               ),
              ),
           ),
         ],
       ),
     );
   }
-
-  Widget _buildExitButton() {
+  
+  Widget _buildInGameExitButton() {
     return IconButton(
       onPressed: () => _showExitDialog(),
       icon: Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.red.withOpacity(0.8),
-          shape: BoxShape.circle,
-        ),
+        decoration: BoxDecoration(color: Colors.red.withOpacity(0.8), shape: BoxShape.circle),
         child: const Icon(Icons.close, color: Colors.white, size: 24),
       ),
     );
   }
 
+  // --- UPDATED DIALOG LOGIC ---
   Future<void> _showExitDialog() async {
     return showDialog(
       context: context,
-      barrierDismissible: false, // User must choose
+      barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('End Game?'),
-          content: const Text('Do you want to quit current run and go back to menu?'),
+          backgroundColor: const Color(0xFF222222),
+          title: const Text('End Session?', style: TextStyle(color: Colors.white)),
+          content: const Text(
+            'Progress from this run will be discarded.',
+            style: TextStyle(color: Colors.white70)
+          ),
           actions: <Widget>[
             TextButton(
               child: const Text('Cancel'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.of(context).pop(),
             ),
             TextButton(
-              child: const Text('Quit', style: TextStyle(color: Colors.red)),
+              child: const Text('Quit to Menu', style: TextStyle(color: Colors.redAccent)),
               onPressed: () {
-                Navigator.of(context).pop();
-                _viewModel.resetGame(); // This resets state and stops game loop
+                Navigator.of(context).pop(); // Close Dialog
+                // Instead of popping the screen, we just reset the game
+                _viewModel.resetGame(); 
               },
             ),
           ],
@@ -179,81 +170,35 @@ class _GameScreenState extends State<GameScreen> {
       },
     );
   }
-  
-  Widget _buildStatusBar() {
-    // If not running, hide status bar or keep it? 
-    // Usually hide it on start screen
-    if (!_viewModel.isGameRunning && !_viewModel.isGameOver) return const SizedBox.shrink();
 
-    final state = _viewModel.detectionState;
+  Widget _buildStatusBar() {
     final progress = _viewModel.carState.progress;
-    
     return Padding(
-      padding: const EdgeInsets.fromLTRB(60, 10, 20, 0), // Left padding for Exit Button
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('⭐ ${_viewModel.carState.score}', 
-                             style: const TextStyle(color: Colors.amber, fontSize: 18, fontWeight: FontWeight.bold)),
-                        const SizedBox(width: 15),
-                        Text('${(progress * 100).toInt()}%', 
-                             style: const TextStyle(color: Colors.white, fontSize: 18)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 6,
-                      backgroundColor: Colors.grey[700],
-                      color: Colors.greenAccent,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Face Icon Indicator
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: state.hasFaceDetected ? Colors.green : Colors.red,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              state.hasFaceDetected ? Icons.face : Icons.face_unlock_outlined,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-        ],
+      padding: const EdgeInsets.fromLTRB(60, 10, 20, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+             Text('⭐ ${_viewModel.carState.score}', style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+             const SizedBox(width: 15),
+             Text('${(progress * 100).toInt()}%', style: const TextStyle(color: Colors.white)),
+          ],
+        ),
       ),
     );
   }
-  
+
+  // --- START SCREEN ---
   Widget _buildStartScreen() {
     final hasFace = _viewModel.detectionState.hasFaceDetected;
     
     return Container(
-      width: 320, // Limit width for better layout on tablets
+      width: 320,
       margin: const EdgeInsets.all(20),
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -263,10 +208,27 @@ class _GameScreenState extends State<GameScreen> {
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('🏁 Eye Race', style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          // Header with Dashboard Button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white54),
+                onPressed: () => Navigator.of(context).pop(), // Go back to Dashboard
+                tooltip: "Back to Dashboard",
+              ),
+              const Text(
+                'Eye Race', 
+                style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)
+              ),
+              const SizedBox(width: 48), // Spacer to center title
+            ],
+          ),
+          
           const SizedBox(height: 20),
-          const Text('Select Difficulty:', style: TextStyle(color: Colors.white70)),
+          const Center(child: Text('Select Difficulty:', style: TextStyle(color: Colors.white70))),
           const SizedBox(height: 12),
           
           FittedBox(
@@ -290,20 +252,17 @@ class _GameScreenState extends State<GameScreen> {
             onPressed: hasFace ? () => _viewModel.startGame() : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
-              disabledBackgroundColor: Colors.grey[700],
-              padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-              elevation: 8,
+              padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
             ),
-            child: const Text('START RACE', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+            child: const Text('START RACE', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
           ),
           
           if (!hasFace)
             Padding(
               padding: const EdgeInsets.only(top: 16),
-              child: Text(
-                '⚠️ Face not detected',
-                style: TextStyle(color: Colors.orange[300], fontWeight: FontWeight.bold),
+              child: Center(
+                child: Text('⚠️ Face not detected', style: TextStyle(color: Colors.orange[300], fontWeight: FontWeight.bold)),
               ),
             ),
         ],
@@ -322,7 +281,6 @@ class _GameScreenState extends State<GameScreen> {
                 color: isSelected ? color : color.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: isSelected ? Colors.white : color.withOpacity(0.5), width: 2),
-                boxShadow: isSelected ? [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8)] : [],
             ),
             child: Text(label, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         ),
@@ -375,43 +333,37 @@ class _GameScreenState extends State<GameScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(isWon ? Icons.emoji_events : Icons.mood_bad, 
-               size: 60, color: isWon ? Colors.amber : Colors.red),
-          const SizedBox(height: 16),
           Text(isWon ? 'VICTORY!' : 'GAME OVER', 
                style: TextStyle(color: isWon ? Colors.green : Colors.red, fontSize: 28, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 24),
+          
+          _buildStatRow('Score', '${_viewModel.carState.score}'),
           const SizedBox(height: 8),
-          Text(isWon ? 'Eye Workout Complete!' : 'Keep blinking to survive!', 
-               textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
-          const SizedBox(height: 24),
-          
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
-            child: Column(
-              children: [
-                _buildStatRow('Score', '${_viewModel.carState.score}'),
-                const Divider(color: Colors.white24),
-                _buildStatRow('Bonuses', '${_viewModel.carState.bonusesCollected}'),
-              ],
-            ),
-          ),
+          _buildStatRow('Bonuses', '${_viewModel.carState.bonusesCollected}'),
           
           const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => _viewModel.resetGame(),
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            label: const Text('PLAY AGAIN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isWon ? Colors.green : Colors.red,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-            ),
-          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+               // THIS BUTTON RETURNS TO MENU (RESET), NOT DASHBOARD
+               OutlinedButton(
+                   onPressed: () => _viewModel.resetGame(), 
+                   style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white54)),
+                   child: const Icon(Icons.menu, color: Colors.white),
+               ),
+               const SizedBox(width: 16),
+               ElevatedButton(
+                   onPressed: () => _viewModel.startGame(), // Instant Retry
+                   style: ElevatedButton.styleFrom(backgroundColor: isWon ? Colors.green : Colors.red),
+                   child: const Text('RETRY', style: TextStyle(color: Colors.white)),
+               ),
+            ],
+          )
         ],
       ),
     );
   }
-  
+
   Widget _buildStatRow(String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
