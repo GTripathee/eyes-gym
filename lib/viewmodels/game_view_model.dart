@@ -30,7 +30,6 @@ class GameViewModel extends ChangeNotifier {
   bool _isGameWon = false;
   bool get isGameWon => _isGameWon;
   
-  // Difficulty State
   DifficultyLevel _difficulty = DifficultyLevel.medium;
   DifficultyLevel get difficulty => _difficulty;
   
@@ -54,15 +53,18 @@ class GameViewModel extends ChangeNotifier {
   
   final Random _random = Random();
   
-  // --- TUNING CONSTANTS ---
-  // Game Length: Multiplied base items by 3x (from ~10 to 30)
-  static const int _baseTotalBonusItems = 30; 
+  // --- CONFIGURATION ---
+  static const double _trackLengthScale = 3.0; 
+  static const int _baseBonusCount = 10; 
+  static const int _baseObstacleCount = 5;
+
   static const double _maxSpeed = 0.03; 
   static const Duration _powerBlinkThreshold = Duration(milliseconds: 600); 
   static const Duration _maxTimeBetweenBlinks = Duration(seconds: 8); 
-  static const double _collectionRange = 0.05; 
-  // Steering Sensitivity: Angle required for max tilt
-  static const double _maxTiltDegrees = 30.0; 
+  
+  // FIX: Reduced range significantly so items touch car before collecting
+  static const double _collectionRange = 0.015; 
+  static const double _maxTiltDegrees = 25.0; 
 
   GameViewModel({
     required this.camera,
@@ -116,21 +118,19 @@ class GameViewModel extends ChangeNotifier {
       );
       
       if (_isGameRunning && _detectionState.eyeState != null) {
-        // 1. Handle Steering (Head Tilt)
-        if (_difficulty != DifficultyLevel.easy) {
+        // --- STEERING ---
+        if (_difficulty == DifficultyLevel.hard) {
             double headTilt = _detectionState.headEulerAngleZ ?? 0.0;
-            // Map tilt (-maxTilt to maxTilt) to X position (-1.0 to 1.0)
             double targetX = (headTilt / _maxTiltDegrees).clamp(-1.0, 1.0) * -1.0; 
-            
-            // Hard mode steering is more responsive (less smooth/forgiving)
-            double lerpFactor = _difficulty == DifficultyLevel.hard ? 0.3 : 0.1;
-            double newX = _carState.xPosition + (targetX - _carState.xPosition) * lerpFactor;
+            double newX = _carState.xPosition + (targetX - _carState.xPosition) * 0.2;
             _carState = _carState.copyWith(xPosition: newX);
         } else {
-             _carState = _carState.copyWith(xPosition: 0.0);
+             // Auto-center (Drift back to middle)
+             double newX = _carState.xPosition * 0.9; 
+             _carState = _carState.copyWith(xPosition: newX);
         }
 
-        // 2. Handle Blinking
+        // --- BLINKING ---
         final blinkEvent = _blinkDetectionService.detectBlink(_detectionState.eyeState!);
         
         if (blinkEvent != null && blinkEvent.type == BlinkType.blinkComplete) {
@@ -156,15 +156,11 @@ class GameViewModel extends ChangeNotifier {
     _lastBlinkTime = DateTime.now();
     _carState = _carState.copyWith(isCharging: false, chargeLevel: 0.0);
     
-    double baseBoost = 0.004;
-    // Difficulty influences the base speed gain
-    if (_difficulty == DifficultyLevel.easy) baseBoost = 0.006; 
-    if (_difficulty == DifficultyLevel.hard) baseBoost = 0.002; // Must blink more frequently for same speed
+    double baseBoost = 0.005;
+    if (_difficulty == DifficultyLevel.easy) baseBoost = 0.007; 
+    if (_difficulty == DifficultyLevel.hard) baseBoost = 0.003; 
     
-    double boost = duration > _powerBlinkThreshold 
-        ? baseBoost * 4.0 // Nitro Boost Multiplier
-        : baseBoost;
-        
+    double boost = duration > _powerBlinkThreshold ? baseBoost * 3.5 : baseBoost;
     double newSpeed = (_carState.speed + boost).clamp(0.0, _maxSpeed);
     _carState = _carState.copyWith(speed: newSpeed);
   }
@@ -190,68 +186,69 @@ class GameViewModel extends ChangeNotifier {
     _bonusItems.clear();
     _obstacles.clear();
     
-    // --- 1. Generate Bonuses (Game Length) ---
-    int bonusCount = _baseTotalBonusItems;
-    if (_difficulty == DifficultyLevel.easy) bonusCount = (_baseTotalBonusItems * 1.5).toInt(); // Easier to win
-    
-    for (int i = 0; i < bonusCount; i++) {
-      // Space items evenly across the 0.0 to 1.0 track length
-      double pos = ((i + 1) / (bonusCount + 1)).clamp(0.05, 0.95);
-      
-      // Random X position based on difficulty
-      double lane = 0.0;
-      if (_difficulty == DifficultyLevel.medium) {
-          lane = (_random.nextDouble() * 1.2) - 0.6; // Wider variance in lane
-      } else if (_difficulty == DifficultyLevel.hard) {
-          lane = (_random.nextDouble() * 1.6) - 0.8; // Max variance
-      }
-          
+    int totalBonuses = (_baseBonusCount * _trackLengthScale).toInt();
+    int totalObstacles = (_baseObstacleCount * _trackLengthScale).toInt();
+
+    // Generate Bonuses
+    for (int i = 0; i < totalBonuses; i++) {
+      double pos = ((i + 1) / (totalBonuses + 2)).clamp(0.02, 0.98);
+      double lane = _difficulty == DifficultyLevel.hard 
+          ? (_random.nextDouble() * 1.4) - 0.7 
+          : 0.0; 
       _bonusItems.add(BonusItem(position: pos, lanePosition: lane));
     }
     
-    // --- 2. Generate Obstacles (Obstacle Fix & Difficulty) ---
-    int obsCount = 0;
-    if (_difficulty == DifficultyLevel.medium) obsCount = 20; 
-    if (_difficulty == DifficultyLevel.hard) obsCount = 40; // Double the density for Hard
-    
-    for (int i = 0; i < obsCount; i++) {
-        // Position items evenly across the track length, ensuring they don't spawn too close
-        double pos = (_random.nextDouble() * 0.9) + 0.05; 
-        double lane = (_random.nextDouble() * 1.6) - 0.8;
-        
-        // Prevent placing obstacle too close to existing bonus or obstacle
-        bool tooClose = _bonusItems.any((b) => (b.position - pos).abs() < 0.02) ||
-                        _obstacles.any((o) => (o.position - pos).abs() < 0.04);
-        
-        if (!tooClose) {
-            _obstacles.add(ObstacleItem(position: pos, lanePosition: lane));
+    // Generate Obstacles (Hard Only)
+    if (_difficulty == DifficultyLevel.hard) {
+        int count = (totalObstacles * 1.5).toInt();
+        for (int i = 0; i < count; i++) {
+            double pos = (_random.nextDouble() * 0.9) + 0.05;
+            double lane = (_random.nextDouble() * 1.6) - 0.8;
+            if (!_isTooClose(pos, lane)) {
+                _obstacles.add(ObstacleItem(position: pos, lanePosition: lane));
+            }
         }
     }
+  }
+  
+  bool _isTooClose(double pos, double lane) {
+      for (var b in _bonusItems) {
+          if ((b.position - pos).abs() < 0.05 && (b.lanePosition - lane).abs() < 0.2) {
+              return true;
+          }
+      }
+      return false;
   }
   
   void _updateGamePhysics() {
     if (!_isGameRunning || _isGameOver) return;
     final now = DateTime.now();
 
-    // 1. Friction (Decay - KEY DIFFERENCE)
-    double friction = 0.97;
-    if (_difficulty == DifficultyLevel.easy) friction = 0.985; // Very slow decay
-    if (_difficulty == DifficultyLevel.medium) friction = 0.97; // Moderate decay
-    if (_difficulty == DifficultyLevel.hard) friction = 0.95; // Fast decay - forces continuous blinking
+    // 1. Calculate Friction
+    double friction = 0.98;
+    if (_difficulty == DifficultyLevel.medium) friction = 0.96;
+    if (_difficulty == DifficultyLevel.hard) friction = 0.93;
     
     double currentSpeed = _carState.speed * friction;
+    double progressDelta = currentSpeed / _trackLengthScale;
     
-    // 2. Obstacle Collisions
+    // 2. OBSTACLE COLLISION (Hard Mode Logic)
     bool crash = false;
-    for (var obs in _obstacles) {
-        if (!obs.hit && obs.checkCollision(_carState.progress, _carState.xPosition, _collectionRange)) {
-            obs.hit = true;
-            crash = true;
-            
-            if (_difficulty == DifficultyLevel.medium) {
-                currentSpeed *= 0.5; // Moderate speed penalty
-            } else if (_difficulty == DifficultyLevel.hard) {
-                currentSpeed = 0.0; // Complete halt for 0.5s
+    if (_difficulty == DifficultyLevel.hard) {
+        for (var obs in _obstacles) {
+            // FIX: Using tighter range for collision too
+            if (!obs.hit && obs.checkCollision(_carState.progress, _carState.xPosition, _collectionRange)) {
+                obs.hit = true;
+                crash = true;
+                
+                // --- PUNISHMENT ---
+                // 1. Instant Stop
+                currentSpeed = 0.0; 
+                
+                // 2. Knockback (Push Back Progress)
+                // We push back by ~2% of the total track.
+                // Since progressDelta is usually +0.001, -0.02 is a "Thud" backwards.
+                progressDelta = -0.02; 
             }
         }
     }
@@ -263,11 +260,16 @@ class GameViewModel extends ChangeNotifier {
         });
     }
 
-    // 3. Movement
-    double newProgress = (_carState.progress + currentSpeed).clamp(0.0, 1.0);
-    _carState = _carState.copyWith(progress: newProgress, speed: currentSpeed);
+    // 3. Update Position
+    // We sum the normal movement + any crash knockback
+    double newProgress = (_carState.progress + progressDelta).clamp(0.0, 1.0);
+    
+    _carState = _carState.copyWith(
+      progress: newProgress,
+      speed: currentSpeed, // If crashed, this is 0.0
+    );
 
-    // 4. Bonus Collection
+    // 4. BONUS COLLECTION (Tighter Hitbox)
     for (var bonus in _bonusItems) {
       if (!bonus.collected && bonus.checkCollection(_carState.progress, _carState.xPosition, _collectionRange)) {
         bonus.collected = true;
@@ -278,9 +280,9 @@ class GameViewModel extends ChangeNotifier {
       }
     }
 
-    // 5. Win/Lose
-    if (_carState.progress >= 1.0) _gameWon();
-    // Timeout logic...
+    // 5. End Game Checks
+    if (_carState.progress >= 0.99) _gameWon();
+    
     if (_lastBlinkTime != null && now.difference(_lastBlinkTime!) > _maxTimeBetweenBlinks) {
         _gameOver();
     }

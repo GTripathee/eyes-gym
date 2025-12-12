@@ -83,7 +83,6 @@ class CarState {
   }
 }
 
-// Base class for items on the road
 class RoadItem {
   final double position; // 0.0 to 1.0 (Y axis)
   final double lanePosition; // -1.0 to 1.0 (X axis)
@@ -104,23 +103,27 @@ class BonusItem extends RoadItem {
   
   bool checkCollection(double carProgress, double carX, double range) {
     if (collected) return false;
-    // Check Y distance
+    
+    // Y Axis Check:
+    // 'range' is now 0.015 (Very small).
+    // The item MUST be within this tiny slice of the track to count.
     final dy = (position - carProgress).abs();
-    // Check X distance (car width approx 0.2)
+    
+    // X Axis Check:
+    // Car width approx 0.25 of lane width.
     final dx = (lanePosition - carX).abs();
     
-    return dy < range && dx < 0.3; // Hit box
+    // Hitbox: Must be vertically aligned (dy < range) AND horizontally close (dx < 0.3)
+    return dy < range && dx < 0.3; 
   }
 }
 
 class ObstacleItem extends RoadItem {
-  final String type; // e.g., "rock", "puddle"
   bool hit;
   
   ObstacleItem({
     required double position,
     required double lanePosition,
-    this.type = 'rock',
     this.hit = false,
   }) : super(position: position, lanePosition: lanePosition);
   
@@ -128,6 +131,8 @@ class ObstacleItem extends RoadItem {
     if (hit) return false;
     final dy = (position - carProgress).abs();
     final dx = (lanePosition - carX).abs();
-    return dy < range && dx < 0.25; // Slightly tighter hit box for obstacles
+    
+    // Obstacles have slightly tighter horizontal width (0.25) so you can dodge them
+    return dy < range && dx < 0.25; 
   }
 }
