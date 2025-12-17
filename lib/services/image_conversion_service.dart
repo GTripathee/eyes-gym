@@ -1,4 +1,6 @@
-import 'dart:ui';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -6,21 +8,28 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 class ImageConversionService {
   
-  InputImage? convertCameraImage(CameraImage image) {
+  InputImage? convertCameraImage(CameraImage image, CameraDescription camera) {
     final WriteBuffer allBytes = WriteBuffer();
     for (final Plane plane in image.planes) {
       allBytes.putUint8List(plane.bytes);
     }
     final bytes = allBytes.done().buffer.asUint8List();
 
-    final Size imageSize = Size(
+    final ui.Size imageSize = ui.Size(
       image.width.toDouble(),
       image.height.toDouble(),
     );
 
-    final InputImageRotation imageRotation = InputImageRotation.rotation0deg;
+    // FIX 1: Calculate correct rotation based on camera sensor
+    final InputImageRotation imageRotation = _inputImageRotation(camera);
 
-    final InputImageFormat inputImageFormat = InputImageFormat.yuv420;
+    // FIX 2: Use NV21 for Android, BGRA8888 for iOS
+    final InputImageFormat inputImageFormat = Platform.isAndroid 
+        ? InputImageFormat.nv21 
+        : InputImageFormat.bgra8888;
+
+    // Verify plane data is available before creating metadata
+    if (image.planes.isEmpty) return null;
 
     final inputImageData = InputImageMetadata(
       size: imageSize,
@@ -35,5 +44,14 @@ class ImageConversionService {
     );
 
     return inputImage;
+  }
+
+  InputImageRotation _inputImageRotation(CameraDescription camera) {
+    final int sensorOrientation = camera.sensorOrientation;
+    // For this app we are likely using Portrait mode, so we map sensor rotation directly.
+    // If you support device rotation (landscape), you need to combine this with 
+    // the device orientation.
+    return InputImageRotationValue.fromRawValue(sensorOrientation) ?? 
+           InputImageRotation.rotation0deg;
   }
 }

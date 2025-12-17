@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:eyesgym/views/dashboard_screen.dart';
 import 'package:eyesgym/views/game_screen.dart';
+import 'package:eyesgym/views/focus_session_screen.dart';
 import 'package:flutter/material.dart';
 
 class LandingPage extends StatelessWidget {
@@ -75,18 +76,35 @@ class LandingPage extends StatelessWidget {
               
               const Spacer(),
               
-              // ACTION BUTTONS
               _buildMenuButton(
                 context,
-                title: "START EXERCISE",
-                subtitle: "Jump straight into a session",
-                icon: Icons.play_arrow_rounded,
+                title: "START RACE",
+                subtitle: "Gamified Blink Training",
+                icon: Icons.sports_esports,
                 color: Colors.green,
                 onTap: () => _navigateToGame(context),
               ),
               
               const SizedBox(height: 16),
               
+              // 2. ZEN FOCUS (NEW)
+              _buildMenuButton(
+                context,
+                title: "ZEN FOCUS",
+                subtitle: "Audio-Guided Therapy",
+                icon: Icons.headphones,
+                color: Colors.purpleAccent,
+                onTap: () {
+                     Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => FocusSessionScreen(camera: camera)),
+                    );
+                },
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // 3. DASHBOARD
               _buildMenuButton(
                 context,
                 title: "MY DASHBOARD",

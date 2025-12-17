@@ -38,8 +38,9 @@ android {
         }
     }
 
-    aaptOptions {
-        noCompress 'tflite'
+        aaptOptions {
+            noCompress += "tflite"
+        
     }
 }
 

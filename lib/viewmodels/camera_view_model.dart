@@ -61,7 +61,8 @@ class CameraViewModel extends ChangeNotifier {
   }
   
   Future<void> _processImage(CameraImage image) async {
-    final inputImage = _imageConversionService.convertCameraImage(image);
+    // FIX: Pass the 'camera' description here to access sensorOrientation
+    final inputImage = _imageConversionService.convertCameraImage(image, camera);
     
     if (inputImage == null) {
       _isDetecting = false;

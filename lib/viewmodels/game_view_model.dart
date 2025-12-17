@@ -110,7 +110,7 @@ class GameViewModel extends ChangeNotifier {
   Future<void> _processImage(CameraImage image) async {
     _isDetecting = true;
     try {
-      final inputImage = _imageConversionService.convertCameraImage(image);
+      final inputImage = _imageConversionService.convertCameraImage(image, camera);
       if (inputImage == null) return;
       
       final faces = await _faceDetectionService.detectFaces(inputImage);
