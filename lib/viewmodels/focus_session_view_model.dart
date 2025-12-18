@@ -17,7 +17,11 @@ class FocusSessionViewModel extends ChangeNotifier {
   
   late CameraController _controller;
   CameraController get controller => _controller;
-  final AudioPlayer _audioPlayer = AudioPlayer();
+
+  // Audio Players
+  final AudioPlayer _musicPlayer = AudioPlayer(); // Background music
+  final AudioPlayer _sfxPlayer = AudioPlayer();   // Success sounds (Bells)
+  final AudioPlayer _cuePlayer = AudioPlayer();   // Guidance cues (Metronome)
   
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
@@ -28,8 +32,9 @@ class FocusSessionViewModel extends ChangeNotifier {
   FaceDetectionState _detectionState = FaceDetectionState();
   FaceDetectionState get detectionState => _detectionState;
   
-  // Session Data
-  final FocusSong _currentSong = FocusSong.calmPiano();
+  // Load the Guided Exercise by default
+  final FocusSong _currentSong = FocusSong.guidedExercise();
+  
   int _currentNoteIndex = 0;
   BlinkNote? get currentNote => _currentNoteIndex < _currentSong.notes.length ? _currentSong.notes[_currentNoteIndex] : null;
   
@@ -44,6 +49,9 @@ class FocusSessionViewModel extends ChangeNotifier {
   DateTime? _sessionStartTime;
   bool _isDetecting = false;
   
+  // CONFIGURATION
+  static const Duration _longBlinkThreshold = Duration(milliseconds: 500);
+
   FocusSessionViewModel({required this.camera})
       : _faceDetectionService = FaceDetectionService(),
         _imageConversionService = ImageConversionService(),
@@ -75,6 +83,12 @@ class FocusSessionViewModel extends ChangeNotifier {
       
       if (_isSessionActive && _detectionState.eyeState != null) {
         final blinkEvent = _blinkDetectionService.detectBlink(_detectionState.eyeState!);
+        
+        // Success Sound Logic (Feedback)
+        if (blinkEvent != null && blinkEvent.type == BlinkType.blinkComplete) {
+          _handleBlinkSound(blinkEvent.duration);
+        }
+
         _checkRhythm(blinkEvent);
       }
       notifyListeners();
@@ -85,16 +99,26 @@ class FocusSessionViewModel extends ChangeNotifier {
     }
   }
 
+  void _handleBlinkSound(Duration duration) {
+    if (duration > _longBlinkThreshold) {
+      // Feedback for Long Blink
+      _sfxPlayer.play(AssetSource('audio/bell_longer.mp3'), mode: PlayerMode.lowLatency);
+    } else {
+      // Feedback for Short Blink
+      _sfxPlayer.play(AssetSource('audio/bell_shorter.mp3'), mode: PlayerMode.lowLatency);
+    }
+  }
+
   void startSession() async {
     _isSessionActive = true;
     _score = 0;
     _currentNoteIndex = 0;
     _sessionBlinks = 0;
-    _feedbackMessage = "Listen...";
+    _feedbackMessage = "Ready...";
     _sessionStartTime = DateTime.now();
     
-    // Play Audio (Uncomment if you have file)
-    // await _audioPlayer.play(AssetSource(_currentSong.audioAssetPath));
+    // Play Background Music
+    await _musicPlayer.play(AssetSource(_currentSong.audioAssetPath));
     
     _gameLoopTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
       _updateLoop();
@@ -110,7 +134,6 @@ class FocusSessionViewModel extends ChangeNotifier {
     
     // Check Song End
     if (_currentNoteIndex >= _currentSong.notes.length) {
-      // Allow a few seconds after last note before ending
       if (elapsed > _currentSong.notes.last.startTime + const Duration(seconds: 4)) {
         stopSession();
       }
@@ -119,12 +142,19 @@ class FocusSessionViewModel extends ChangeNotifier {
 
     final note = _currentSong.notes[_currentNoteIndex];
     
-    // Move to next note if this one passed
+    // 1. Play CUE Sound at exact start of note (Guide the user)
+    // We check if we are within 50ms of the start time to trigger the sound once
+    double diff = (elapsed - note.startTime).inMilliseconds.toDouble();
+    if (diff >= 0 && diff < 60) {
+       // Play a tick/cue to tell user to act
+       _cuePlayer.play(AssetSource('audio/blink.mp3'), mode: PlayerMode.lowLatency);
+    }
+
+    // 2. Update Window & Text
     if (elapsed > note.startTime + note.duration + const Duration(milliseconds: 500)) {
        _currentNoteIndex++;
-       _feedbackMessage = "Listen...";
+       _feedbackMessage = "Relax...";
     } else if (elapsed >= note.startTime && elapsed <= note.startTime + note.duration) {
-       // INSIDE NOTE WINDOW
        if (note.type == NoteType.long) {
          _feedbackMessage = "HOLD BLINK...";
        } else {
@@ -141,7 +171,6 @@ class FocusSessionViewModel extends ChangeNotifier {
     final elapsed = now.difference(_sessionStartTime!);
     final note = currentNote!;
     
-    // Window of opportunity
     bool inWindow = elapsed >= note.startTime && 
                     elapsed <= note.startTime + note.duration + const Duration(milliseconds: 300);
                     
@@ -149,7 +178,7 @@ class FocusSessionViewModel extends ChangeNotifier {
         if (note.type == NoteType.short && event?.type == BlinkType.blinkComplete) {
             _score += 10;
             _sessionBlinks++;
-            _feedbackMessage = "Perfect Rhythm!";
+            _feedbackMessage = "Perfect!";
         } else if (note.type == NoteType.long) {
             // Logic for hold
             if (event?.type == BlinkType.blinkComplete && event!.duration > const Duration(milliseconds: 800)) {
@@ -164,7 +193,9 @@ class FocusSessionViewModel extends ChangeNotifier {
   void stopSession() {
     _isSessionActive = false;
     _gameLoopTimer?.cancel();
-    _audioPlayer.stop();
+    _musicPlayer.stop();
+    _sfxPlayer.stop();
+    _cuePlayer.stop();
     StorageService().saveGameSession(_score, _sessionBlinks);
     _feedbackMessage = "Session Complete";
     notifyListeners();
@@ -175,7 +206,9 @@ class FocusSessionViewModel extends ChangeNotifier {
     _gameLoopTimer?.cancel();
     _controller.dispose();
     _faceDetectionService.dispose();
-    _audioPlayer.dispose();
+    _musicPlayer.dispose();
+    _sfxPlayer.dispose();
+    _cuePlayer.dispose();
     super.dispose();
   }
 }
